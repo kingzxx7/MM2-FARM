@@ -1,36 +1,27 @@
--- Carrega a UI do Rayfield
 local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
 
-local Players = game:GetService("Players")
+local Players   = game:GetService("Players")
 local Workspace = game:GetService("Workspace")
-local LP = Players.LocalPlayer
+local LP        = Players.LocalPlayer
 
--- ===== CONFIG =====
 local MAX_COINS      = 40
 local COLLECT_RADIUS = 6
 local MOVE_TIMEOUT   = 6
-local SCAN_WAIT      = 0.4
-local COIN_NAMES     = {"Coin", "Moeda", "CoinTest"}
+local SCAN_WAIT      = 0.5
 
--- ===== ESTADO =====
-local State = {
-    Running   = false,
-    CoinCount = 0,
-    Active    = false,
-}
+local State = { Running = false, CoinCount = 0, Active = false }
 
--- ===== JANELA RAYFIELD =====
 local Window = Rayfield:CreateWindow({
     Name = "MM2 COIN FARM HUB",
     LoadingTitle = "Carregando...",
-    LoadingSubtitle = "por você",
+    LoadingSubtitle = "farm hub",
     ConfigurationSaving = { Enabled = false },
     KeySystem = false,
 })
 
 local Tab = Window:CreateTab("Farm", 4483362458)
 
-local CoinLabel = Tab:CreateLabel("Coins: 0/" .. MAX_COINS)
+local CoinLabel   = Tab:CreateLabel("Coins: 0/" .. MAX_COINS)
 local StatusLabel = Tab:CreateLabel("Status: Parado")
 
 local AutoToggle
@@ -39,11 +30,7 @@ AutoToggle = Tab:CreateToggle({
     CurrentValue = false,
     Flag = "AutoFarm",
     Callback = function(v)
-        if v then
-            startFarm()
-        else
-            stopFarm()
-        end
+        if v then startFarm() else stopFarm() end
     end,
 })
 
@@ -55,37 +42,31 @@ Tab:CreateButton({
     end,
 })
 
--- ===== FUNÇÕES =====
-local function notify(t, c)
+local function notify(t)
     Rayfield:Notify({Title = "MM2 Farm", Content = t, Duration = 2})
 end
-
 local function updateUI()
     CoinLabel:Set("Coins: " .. State.CoinCount .. "/" .. MAX_COINS)
 end
-
 local function setStatus(t)
     StatusLabel:Set("Status: " .. t)
 end
 
+-- Procura moedas em QUALQUER mapa ativo
 local function getCoins()
-    local container = Workspace:FindFirstChild("Coins") or Workspace
     local list = {}
-    for _, obj in ipairs(container:GetChildren()) do
-        if obj:IsA("BasePart") or obj:IsA("Model") then
-            local match = false
-            for _, n in ipairs(COIN_NAMES) do
-                if obj.Name:lower():find(n:lower(), 1, true) then
-                    match = true
-                    break
+    for _, map in ipairs(Workspace:GetChildren()) do
+        local container = map:FindFirstChild("CoinContainer")
+        if container then
+            for _, coinModel in ipairs(container:GetChildren()) do
+                if coinModel.Name == "Coin_Server" then
+                    -- pega CoinVisual.MainCoin (a parte real)
+                    local visual = coinModel:FindFirstChild("CoinVisual")
+                    local part   = visual and visual:FindFirstChild("MainCoin")
+                    if part and part:IsA("BasePart") and part.Parent then
+                        table.insert(list, {obj = coinModel, part = part})
+                    end
                 end
-            end
-            if match then
-                local part = obj:IsA("BasePart") and obj or obj.PrimaryPart
-                if not part and obj:IsA("Model") then
-                    part = obj:FindFirstChildWhichIsA("BasePart", true)
-                end
-                if part then table.insert(list, {obj = obj, part = part}) end
             end
         end
     end
@@ -99,10 +80,8 @@ local function getNearest()
     if not hrp then return nil end
     local best, bd = nil, math.huge
     for _, c in ipairs(getCoins()) do
-        if c.part.Parent then
-            local d = (c.part.Position - hrp.Position).Magnitude
-            if d < bd then bd = d best = c end
-        end
+        local d = (c.part.Position - hrp.Position).Magnitude
+        if d < bd then bd = d best = c end
     end
     return best
 end
@@ -127,7 +106,6 @@ local function resetChar()
     if hum then hum.Health = 0 end
 end
 
--- ===== LOOP =====
 local function cycle()
     if State.Active then return end
     State.Active = true
@@ -163,10 +141,16 @@ local function cycle()
                     local hn = cn and cn:FindFirstChild("HumanoidRootPart")
                     if coin.part and coin.part.Parent and hn then
                         if (coin.part.Position - hn.Position).Magnitude <= COLLECT_RADIUS + 2 then
-                            coin.obj:Destroy()
+                            -- No MM2, encostar já coleta automaticamente pela TouchInterest
+                            -- Não destrói nada, apenas conta e espera sumir
                             State.CoinCount = State.CoinCount + 1
                             updateUI()
                             notify("Moeda " .. State.CoinCount .. "/" .. MAX_COINS)
+                            -- Espera a moeda sumir (server vai remover)
+                            local gone = tick()
+                            while coin.part.Parent and tick() - gone < 1.5 do
+                                task.wait(0.1)
+                            end
                         end
                     end
                 end
