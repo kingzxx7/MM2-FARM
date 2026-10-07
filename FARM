@@ -7,6 +7,7 @@ local LP         = Players.LocalPlayer
 
 local MAX_COINS      = 40
 local COLLECT_RADIUS = 8
+local MAX_HEIGHT_DIFF = 12   -- ignora moedas que estão mais de 12 studs acima/abaixo do HRP
 
 local CONFIG = {
     Speed   = 150,
@@ -14,7 +15,7 @@ local CONFIG = {
     AntiAFK = true,
 }
 
-local State = { Running = false, CoinCount = 0, Active = false, Waiting = false }
+local State = { Running = false, CoinCount = 0, Active = false, Dead = false }
 
 -- ===== INTERFACE =====
 local Window = Rayfield:CreateWindow({
@@ -26,7 +27,6 @@ local Window = Rayfield:CreateWindow({
 })
 
 local Tab = Window:CreateTab("Farm", 4483362458)
-
 local CoinLabel   = Tab:CreateLabel("Coins: 0/" .. MAX_COINS)
 local StatusLabel = Tab:CreateLabel("Status: Parado")
 
@@ -35,9 +35,7 @@ AutoToggle = Tab:CreateToggle({
     Name = "Auto Farm",
     CurrentValue = false,
     Flag = "AutoFarm",
-    Callback = function(v)
-        if v then startFarm() else stopFarm() end
-    end,
+    Callback = function(v) if v then startFarm() else stopFarm() end end,
 })
 
 Tab:CreateButton({
@@ -52,25 +50,20 @@ Tab:CreateSection("Movimento")
 
 Tab:CreateSlider({
     Name = "Velocidade de Voo",
-    Range = {30, 400},
-    Increment = 10,
-    Suffix = "studs/s",
-    CurrentValue = CONFIG.Speed,
-    Flag = "FlySpeed",
+    Range = {30, 400}, Increment = 10, Suffix = "studs/s",
+    CurrentValue = CONFIG.Speed, Flag = "FlySpeed",
     Callback = function(v) CONFIG.Speed = v end,
 })
 
 Tab:CreateToggle({
     Name = "Atravessar Paredes (NoClip)",
-    CurrentValue = true,
-    Flag = "NoClip",
+    CurrentValue = true, Flag = "NoClip",
     Callback = function(v) CONFIG.NoClip = v end,
 })
 
 Tab:CreateToggle({
     Name = "Anti-AFK",
-    CurrentValue = true,
-    Flag = "AntiAFK",
+    CurrentValue = true, Flag = "AntiAFK",
     Callback = function(v) CONFIG.AntiAFK = v end,
 })
 
@@ -105,9 +98,30 @@ RunService.Stepped:Connect(function()
     end
 end)
 
--- ===== BUSCAR MOEDAS =====
+-- ===== DETECTAR MORTE EM TEMPO REAL =====
+LP.CharacterAdded:Connect(function(char)
+    State.Dead = false
+    local hum = char:WaitForChild("Humanoid", 5)
+    if hum then
+        hum.Died:Connect(function()
+            State.Dead = true
+        end)
+    end
+end)
+
+if LP.Character then
+    local hum = LP.Character:FindFirstChildOfClass("Humanoid")
+    if hum then hum.Died:Connect(function() State.Dead = true end) end
+end
+
+-- ===== BUSCAR MOEDAS (filtrando as do céu) =====
 local function getCoins()
     local list = {}
+    local char = LP.Character
+    if not char then return list end
+    local hrp = char:FindFirstChild("HumanoidRootPart")
+    if not hrp then return list end
+
     for _, map in ipairs(Workspace:GetChildren()) do
         local container = map:FindFirstChild("CoinContainer")
         if container then
@@ -116,7 +130,11 @@ local function getCoins()
                     local visual = coinModel:FindFirstChild("CoinVisual")
                     local part   = visual and visual:FindFirstChild("MainCoin")
                     if part and part:IsA("BasePart") and part.Parent then
-                        table.insert(list, {obj = coinModel, part = part})
+                        -- Filtro: ignora moedas muito acima ou abaixo do jogador
+                        local diffY = math.abs(part.Position.Y - hrp.Position.Y)
+                        if diffY <= MAX_HEIGHT_DIFF then
+                            table.insert(list, {obj = coinModel, part = part})
+                        end
                     end
                 end
             end
@@ -139,15 +157,15 @@ local function getNearest()
 end
 
 -- ===== ESPERAR PERSONAGEM PRONTO =====
-local function waitForCharacterReady()
-    local char = LP.Character
-    if not char then
-        char = LP.CharacterAdded:Wait()
+local function waitCharReady()
+    if not LP.Character then
+        LP.CharacterAdded:Wait()
     end
-    local hum = char:WaitForChild("Humanoid", 5)
+    local char = LP.Character
+    local hum = char and char:WaitForChild("Humanoid", 5)
     if hum then
-        if hum.Health <= 0 then
-            LP.CharacterAdded:Wait()
+        while hum.Health <= 0 do
+            task.wait(0.2)
         end
     end
     task.wait(1)
@@ -156,11 +174,9 @@ end
 -- ===== ESPERAR PARTIDA COMEÇAR =====
 local function waitForRound()
     State.Waiting = true
-    setStatus("Aguardando partida iniciar...")
-    notify("Aguardando nova partida")
+    setStatus("Aguardando partida...")
 
     while State.Running do
-        -- Personagem vivo E moedas existindo = partida rodando
         local char = LP.Character
         local hum = char and char:FindFirstChildOfClass("Humanoid")
         if hum and hum.Health > 0 then
@@ -176,12 +192,6 @@ local function waitForRound()
     return false
 end
 
-local function waitChar()
-    if LP.Character then return end
-    LP.CharacterAdded:Wait()
-    task.wait(0.5)
-end
-
 local function resetChar()
     local char = LP.Character
     if not char then return end
@@ -189,72 +199,107 @@ local function resetChar()
     if hum then hum.Health = 0 end
 end
 
+-- ===== VOO =====
+local function flyTo(pos)
+    local char = LP.Character
+    if not char then return false end
+    local hrp = char:FindFirstChild("HumanoidRootPart")
+    if not hrp then return false end
+
+    while State.Running and not State.Dead do
+        local cn = LP.Character
+        if not cn then return false end
+        local hn = cn:FindFirstChild("HumanoidRootPart")
+        if not hn then return false end
+
+        local current = hn.Position
+        local dir = pos - current
+        local dist = dir.Magnitude
+
+        if dist <= 2 then return true end
+
+        local step = dir.Unit * math.min(CONFIG.Speed * (1/60), dist)
+        hn.CFrame = CFrame.new(current + step)
+        RunService.RenderStepped:Wait()
+    end
+    return false
+end
+
 -- ===== LOOP PRINCIPAL =====
 local function cycle()
     if State.Active then return end
     State.Active = true
     State.CoinCount = 0
+    State.Dead = false
     updateUI()
     setStatus("Iniciando ciclo")
     notify("Novo ciclo iniciado")
 
     while State.Running and State.CoinCount < MAX_COINS do
-        -- Verifica se personagem morreu no meio
+        -- Se morreu, para tudo e espera nova partida
+        if State.Dead then
+            setStatus("Morreu, aguardando nova partida...")
+            notify("Personagem morreu")
+            task.wait(2)
+            if not waitForRound() then break end
+            State.Dead = false
+            State.CoinCount = 0
+            updateUI()
+            setStatus("Nova partida iniciada")
+            notify("Retomando farm")
+        end
+
         local char = LP.Character
         local hum = char and char:FindFirstChildOfClass("Humanoid")
         if not char or not hum or hum.Health <= 0 then
-            setStatus("Personagem morreu, aguardando...")
-            task.wait(2)
-            -- Espera nova partida começar
-            if not waitForRound() then break end
-            setStatus("Partida iniciada, retomando...")
+            State.Dead = true
+            continue
         end
 
         local coin = getNearest()
         if not coin then
-            setStatus("Aguardando moedas...")
+            setStatus("Aguardando moedas próximas...")
             task.wait(0.5)
         else
             setStatus("Voando até moeda")
-            local char = LP.Character
-            if not char then
-                waitChar()
-            else
-                local hrp = char:FindFirstChild("HumanoidRootPart")
-                if hrp then
-                    -- Vai direto pra moeda, mantendo a altura atual do HRP
-                    local dest = coin.part.Position
-                    local t0 = tick()
 
-                    while State.Running and tick() - t0 < 8 do
-                        if not coin.part or not coin.part.Parent then break end
-                        local cn = LP.Character
-                        if not cn then break end
-                        local hn = cn:FindFirstChild("HumanoidRootPart")
-                        if not hn then break end
+            local dest = coin.part.Position
+            local coinObj = coin.obj
 
-                        local current = hn.Position
-                        local dir = dest - current
-                        local dist = dir.Magnitude
+            -- Guarda referência ANTES de voar
+            local visualRef = coin.part
+            local serverRef = coin.obj
 
-                        if dist <= 3 then break end
+            local ok = flyTo(dest)
 
-                        local step = dir.Unit * math.min(CONFIG.Speed * (1/60), dist)
-                        hn.CFrame = CFrame.new(current + step)
-                        RunService.RenderStepped:Wait()
-                    end
+            -- Só conta se:
+            -- 1. Chegou perto
+            -- 2. A moeda REALMENTE desapareceu (server removeu)
+            if ok and not State.Dead then
+                local cn = LP.Character
+                local hn = cn and cn:FindFirstChild("HumanoidRootPart")
+                if hn then
+                    local dist = (dest - hn.Position).Magnitude
+                    if dist <= COLLECT_RADIUS then
+                        -- Espera a moeda sumir de verdade
+                        local gone = tick()
+                        local disappeared = false
+                        while tick() - gone < 2 do
+                            if not serverRef.Parent then
+                                disappeared = true
+                                break
+                            end
+                            task.wait(0.05)
+                        end
 
-                    local cn = LP.Character
-                    local hn = cn and cn:FindFirstChild("HumanoidRootPart")
-                    if coin.part and coin.part.Parent and hn then
-                        if (coin.part.Position - hn.Position).Magnitude <= COLLECT_RADIUS then
+                        if disappeared then
                             State.CoinCount = State.CoinCount + 1
                             updateUI()
                             notify("Moeda " .. State.CoinCount .. "/" .. MAX_COINS)
-                            local gone = tick()
-                            while coin.part.Parent and tick() - gone < 1.5 do
-                                task.wait(0.1)
-                            end
+                        else
+                            -- Não sumiu = não foi coletada, ignora (não conta)
+                            setStatus("Moeda não coletada, tentando outra")
+                            task.wait(0.3)
                         end
                     end
                 end
@@ -270,7 +315,6 @@ local function cycle()
         State.Active = false
         resetChar()
 
-        -- Espera respawn + nova partida
         task.wait(2)
         if not waitForRound() then
             setStatus("Farm interrompido")
@@ -295,9 +339,10 @@ function startFarm()
         return
     end
     State.Running = true
+    State.Dead = false
     notify("Farm iniciado")
     task.spawn(function()
-        -- Espera partida ativa antes de começar
+        waitCharReady()
         if not waitForRound() then
             setStatus("Farm parado")
             return
