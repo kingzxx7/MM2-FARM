@@ -1,0 +1,606 @@
+```lua
+--[[
+    MM2 COIN FARM HUB
+    Uso: Delta Executor
+--]]
+
+local Players            = game:GetService("Players")
+local RunService         = game:GetService("RunService")
+local TweenService       = game:GetService("TweenService")
+local UserInputService   = game:GetService("UserInputService")
+local Workspace          = game:GetService("Workspace")
+
+local LocalPlayer        = Players.LocalPlayer
+local PlayerGui          = LocalPlayer:WaitForChild("PlayerGui")
+
+local CONFIG = {
+    CoinNames      = {"Coin", "Moeda", "CoinTest"},
+    CoinTag        = "MM2FarmCoin",
+    MaxCoins       = 40,
+    MoveTimeout    = 6,
+    CollectRadius  = 6,
+    ScanInterval   = 0.4,
+    RGBSpeed       = 1.6,
+}
+
+local State = {
+    AutoFarm     = false,
+    Running      = false,
+    CoinCount    = 0,
+    TargetCoin   = nil,
+    CycleActive  = false,
+}
+
+local function makeGui()
+    if PlayerGui:FindFirstChild("MM2FarmHub") then
+        PlayerGui.MM2FarmHub:Destroy()
+    end
+
+    local gui = Instance.new("ScreenGui")
+    gui.Name = "MM2FarmHub"
+    gui.ResetOnSpawn = false
+    gui.IgnoreGuiInset = true
+    gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+    gui.Parent = PlayerGui
+
+    local toggleBtn = Instance.new("TextButton")
+    toggleBtn.Name = "ToggleBtn"
+    toggleBtn.Size = UDim2.new(0, 60, 0, 60)
+    toggleBtn.Position = UDim2.new(0, 20, 0.5, -30)
+    toggleBtn.BackgroundColor3 = Color3.fromRGB(18, 18, 22)
+    toggleBtn.BorderSizePixel = 0
+    toggleBtn.Text = "M"
+    toggleBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+    toggleBtn.TextScaled = true
+    toggleBtn.Font = Enum.Font.GothamBold
+    toggleBtn.AutoButtonColor = false
+    toggleBtn.Parent = gui
+
+    local toggleCorner = Instance.new("UICorner")
+    toggleCorner.CornerRadius = UDim.new(1, 0)
+    toggleCorner.Parent = toggleBtn
+
+    local toggleStroke = Instance.new("UIStroke")
+    toggleStroke.Thickness = 2
+    toggleStroke.Color = Color3.fromRGB(255, 0, 128)
+    toggleStroke.Parent = toggleBtn
+
+    local main = Instance.new("Frame")
+    main.Name = "Main"
+    main.Size = UDim2.new(0, 300, 0, 360)
+    main.Position = UDim2.new(0, 90, 0.5, -180)
+    main.BackgroundColor3 = Color3.fromRGB(20, 20, 25)
+    main.BorderSizePixel = 0
+    main.ClipsDescendants = true
+    main.Visible = false
+    main.Parent = gui
+
+    local mainCorner = Instance.new("UICorner")
+    mainCorner.CornerRadius = UDim.new(0, 16)
+    mainCorner.Parent = main
+
+    local mainStroke = Instance.new("UIStroke")
+    mainStroke.Thickness = 2
+    mainStroke.Color = Color3.fromRGB(255, 0, 128)
+    mainStroke.Parent = main
+
+    local header = Instance.new("Frame")
+    header.Name = "Header"
+    header.Size = UDim2.new(1, 0, 0, 42)
+    header.BackgroundColor3 = Color3.fromRGB(15, 15, 20)
+    header.BorderSizePixel = 0
+    header.Parent = main
+
+    local headerCorner = Instance.new("UICorner")
+    headerCorner.CornerRadius = UDim.new(0, 16)
+    headerCorner.Parent = header
+
+    local headerFix = Instance.new("Frame")
+    headerFix.Size = UDim2.new(1, 0, 0, 20)
+    headerFix.Position = UDim2.new(0, 0, 1, -20)
+    headerFix.BackgroundColor3 = Color3.fromRGB(15, 15, 20)
+    headerFix.BorderSizePixel = 0
+    headerFix.Parent = header
+
+    local title = Instance.new("TextLabel")
+    title.Size = UDim2.new(1, -60, 1, 0)
+    title.Position = UDim2.new(0, 15, 0, 0)
+    title.BackgroundTransparency = 1
+    title.Text = "MM2 COIN FARM HUB"
+    title.TextColor3 = Color3.fromRGB(255, 255, 255)
+    title.TextSize = 15
+    title.Font = Enum.Font.GothamBold
+    title.TextXAlignment = Enum.TextXAlignment.Left
+    title.Parent = header
+
+    local closeBtn = Instance.new("TextButton")
+    closeBtn.Size = UDim2.new(0, 24, 0, 24)
+    closeBtn.Position = UDim2.new(1, -32, 0, 9)
+    closeBtn.BackgroundColor3 = Color3.fromRGB(60, 20, 30)
+    closeBtn.Text = "X"
+    closeBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+    closeBtn.TextSize = 12
+    closeBtn.Font = Enum.Font.GothamBold
+    closeBtn.BorderSizePixel = 0
+    closeBtn.Parent = header
+
+    local closeCorner = Instance.new("UICorner")
+    closeCorner.CornerRadius = UDim.new(1, 0)
+    closeCorner.Parent = closeBtn
+
+    local content = Instance.new("Frame")
+    content.Size = UDim2.new(1, -20, 1, -60)
+    content.Position = UDim2.new(0, 10, 0, 50)
+    content.BackgroundTransparency = 1
+    content.Parent = main
+
+    local layout = Instance.new("UIListLayout")
+    layout.Padding = UDim.new(0, 8)
+    layout.SortOrder = Enum.SortOrder.LayoutOrder
+    layout.Parent = content
+
+    local function makeCard(height)
+        local card = Instance.new("Frame")
+        card.Size = UDim2.new(1, 0, 0, height)
+        card.BackgroundColor3 = Color3.fromRGB(28, 28, 34)
+        card.BorderSizePixel = 0
+        card.Parent = content
+
+        local c = Instance.new("UICorner")
+        c.CornerRadius = UDim.new(0, 12)
+        c.Parent = card
+
+        local s = Instance.new("UIStroke")
+        s.Thickness = 1
+        s.Color = Color3.fromRGB(80, 80, 100)
+        s.Parent = card
+
+        return card
+    end
+
+    local counterCard = makeCard(70)
+    counterCard.Name = "CounterCard"
+
+    local counterLabel = Instance.new("TextLabel")
+    counterLabel.Name = "Counter"
+    counterLabel.Size = UDim2.new(1, -20, 0, 30)
+    counterLabel.Position = UDim2.new(0, 10, 0, 10)
+    counterLabel.BackgroundTransparency = 1
+    counterLabel.Text = "Coins: 0/" .. CONFIG.MaxCoins
+    counterLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+    counterLabel.TextSize = 20
+    counterLabel.Font = Enum.Font.GothamBold
+    counterLabel.TextXAlignment = Enum.TextXAlignment.Left
+    counterLabel.Parent = counterCard
+
+    local statusLabel = Instance.new("TextLabel")
+    statusLabel.Name = "Status"
+    statusLabel.Size = UDim2.new(1, -20, 0, 20)
+    statusLabel.Position = UDim2.new(0, 10, 0, 42)
+    statusLabel.BackgroundTransparency = 1
+    statusLabel.Text = "Status: Parado"
+    statusLabel.TextColor3 = Color3.fromRGB(160, 160, 180)
+    statusLabel.TextSize = 12
+    statusLabel.Font = Enum.Font.Gotham
+    statusLabel.TextXAlignment = Enum.TextXAlignment.Left
+    statusLabel.Parent = counterCard
+
+    local autoCard = makeCard(50)
+
+    local autoLabel = Instance.new("TextLabel")
+    autoLabel.Size = UDim2.new(0.6, 0, 1, 0)
+    autoLabel.Position = UDim2.new(0, 14, 0, 0)
+    autoLabel.BackgroundTransparency = 1
+    autoLabel.Text = "Auto Farm"
+    autoLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+    autoLabel.TextSize = 14
+    autoLabel.Font = Enum.Font.GothamMedium
+    autoLabel.TextXAlignment = Enum.TextXAlignment.Left
+    autoLabel.Parent = autoCard
+
+    local switchBg = Instance.new("Frame")
+    switchBg.Name = "SwitchBg"
+    switchBg.Size = UDim2.new(0, 46, 0, 26)
+    switchBg.Position = UDim2.new(1, -60, 0.5, -13)
+    switchBg.BackgroundColor3 = Color3.fromRGB(60, 60, 70)
+    switchBg.BorderSizePixel = 0
+    switchBg.Parent = autoCard
+
+    local switchCorner = Instance.new("UICorner")
+    switchCorner.CornerRadius = UDim.new(1, 0)
+    switchCorner.Parent = switchBg
+
+    local switchKnob = Instance.new("Frame")
+    switchKnob.Name = "Knob"
+    switchKnob.Size = UDim2.new(0, 20, 0, 20)
+    switchKnob.Position = UDim2.new(0, 3, 0.5, -10)
+    switchKnob.BackgroundColor3 = Color3.fromRGB(230, 230, 230)
+    switchKnob.BorderSizePixel = 0
+    switchKnob.Parent = switchBg
+
+    local knobCorner = Instance.new("UICorner")
+    knobCorner.CornerRadius = UDim.new(1, 0)
+    knobCorner.Parent = switchKnob
+
+    local switchBtn = Instance.new("TextButton")
+    switchBtn.Size = UDim2.new(1, 0, 1, 0)
+    switchBtn.BackgroundTransparency = 1
+    switchBtn.Text = ""
+    switchBtn.Parent = switchBg
+
+    local btnRow = makeCard(50)
+
+    local function makeActionButton(text, color, xScale, xOffset, widthScale)
+        local b = Instance.new("TextButton")
+        b.Size = UDim2.new(widthScale, 0, 0, 34)
+        b.Position = UDim2.new(xScale, xOffset, 0.5, -17)
+        b.BackgroundColor3 = color
+        b.Text = text
+        b.TextColor3 = Color3.fromRGB(255, 255, 255)
+        b.TextSize = 13
+        b.Font = Enum.Font.GothamBold
+        b.BorderSizePixel = 0
+        b.AutoButtonColor = true
+        b.Parent = btnRow
+
+        local c = Instance.new("UICorner")
+        c.CornerRadius = UDim.new(0, 8)
+        c.Parent = b
+
+        local s = Instance.new("UIStroke")
+        s.Thickness = 1
+        s.Color = Color3.fromRGB(90, 90, 110)
+        s.Parent = b
+
+        return b
+    end
+
+    local startBtn = makeActionButton("Start",  Color3.fromRGB(40, 130, 70),  0, 10, 0.47)
+    local stopBtn  = makeActionButton("Stop Farm", Color3.fromRGB(150, 40, 50), 0.5, 0, 0.47)
+
+    local notifHolder = Instance.new("Frame")
+    notifHolder.Name = "NotifHolder"
+    notifHolder.Size = UDim2.new(0, 260, 1, -40)
+    notifHolder.Position = UDim2.new(1, -280, 0, 20)
+    notifHolder.BackgroundTransparency = 1
+    notifHolder.Parent = gui
+
+    local notifLayout = Instance.new("UIListLayout")
+    notifLayout.Padding = UDim.new(0, 8)
+    notifLayout.VerticalAlignment = Enum.VerticalAlignment.Top
+    notifLayout.SortOrder = Enum.SortOrder.LayoutOrder
+    notifLayout.Parent = notifHolder
+
+    local function notify(text, duration)
+        duration = duration or 3
+
+        local n = Instance.new("Frame")
+        n.Size = UDim2.new(1, 0, 0, 44)
+        n.BackgroundColor3 = Color3.fromRGB(22, 22, 28)
+        n.BackgroundTransparency = 1
+        n.BorderSizePixel = 0
+        n.Parent = notifHolder
+
+        local c = Instance.new("UICorner")
+        c.CornerRadius = UDim.new(0, 10)
+        c.Parent = n
+
+        local s = Instance.new("UIStroke")
+        s.Thickness = 1.5
+        s.Color = Color3.fromRGB(255, 0, 128)
+        s.Transparency = 1
+        s.Parent = n
+
+        local lbl = Instance.new("TextLabel")
+        lbl.Size = UDim2.new(1, -20, 1, 0)
+        lbl.Position = UDim2.new(0, 10, 0, 0)
+        lbl.BackgroundTransparency = 1
+        lbl.Text = "  " .. text
+        lbl.TextColor3 = Color3.fromRGB(255, 255, 255)
+        lbl.TextSize = 13
+        lbl.Font = Enum.Font.GothamMedium
+        lbl.TextXAlignment = Enum.TextXAlignment.Left
+        lbl.TextTransparency = 1
+        lbl.Parent = n
+
+        TweenService:Create(n,   TweenInfo.new(0.25), {BackgroundTransparency = 0}):Play()
+        TweenService:Create(s,   TweenInfo.new(0.25), {Transparency = 0}):Play()
+        TweenService:Create(lbl, TweenInfo.new(0.25), {TextTransparency = 0}):Play()
+
+        task.delay(duration, function()
+            TweenService:Create(n,   TweenInfo.new(0.3), {BackgroundTransparency = 1}):Play()
+            TweenService:Create(s,   TweenInfo.new(0.3), {Transparency = 1}):Play()
+            TweenService:Create(lbl, TweenInfo.new(0.3), {TextTransparency = 1}):Play()
+            task.wait(0.35)
+            n:Destroy()
+        end)
+    end
+
+    local function updateCounter()
+        counterLabel.Text = "Coins: " .. State.CoinCount .. "/" .. CONFIG.MaxCoins
+
+        if State.CoinCount >= CONFIG.MaxCoins then
+            counterLabel.TextColor3 = Color3.fromRGB(120, 255, 150)
+        else
+            counterLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+        end
+    end
+
+    local function updateStatus(txt, color)
+        statusLabel.Text = "Status: " .. txt
+        statusLabel.TextColor3 = color or Color3.fromRGB(160, 160, 180)
+    end
+
+    task.spawn(function()
+        local t = 0
+        while gui.Parent do
+            t = t + (1/60) * CONFIG.RGBSpeed
+            local hue = (t % 1)
+            local color = Color3.fromHSV(hue, 1, 1)
+
+            toggleStroke.Color = color
+            mainStroke.Color   = color
+
+            RunService.RenderStepped:Wait()
+        end
+    end)
+
+    local dragging, dragStart, startPos
+    header.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1
+        or input.UserInputType == Enum.UserInputType.Touch then
+            dragging = true
+            dragStart = input.Position
+            startPos = main.Position
+        end
+    end)
+    UserInputService.InputChanged:Connect(function(input)
+        if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement
+        or input.UserInputType == Enum.UserInputType.Touch) then
+            local delta = input.Position - dragStart
+            main.Position = UDim2.new(
+                startPos.X.Scale, startPos.X.Offset + delta.X,
+                startPos.Y.Scale, startPos.Y.Offset + delta.Y
+            )
+        end
+    end)
+    UserInputService.InputEnded:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1
+        or input.UserInputType == Enum.UserInputType.Touch then
+            dragging = false
+        end
+    end)
+
+    local menuOpen = false
+    local function setMenu(open)
+        menuOpen = open
+        if open then
+            main.Visible = true
+            main.Size = UDim2.new(0, 300, 0, 1)
+            TweenService:Create(main, TweenInfo.new(0.25, Enum.EasingStyle.Back, Enum.EasingDirection.Out),
+                {Size = UDim2.new(0, 300, 0, 360)}):Play()
+        else
+            local tw = TweenService:Create(main, TweenInfo.new(0.2),
+                {Size = UDim2.new(0, 300, 0, 1)})
+            tw:Play()
+            tw.Completed:Connect(function() main.Visible = false end)
+        end
+    end
+
+    toggleBtn.MouseButton1Click:Connect(function()
+        setMenu(not menuOpen)
+    end)
+    closeBtn.MouseButton1Click:Connect(function()
+        setMenu(false)
+    end)
+
+    return {
+        Gui            = gui,
+        ToggleBtn      = toggleBtn,
+        Main           = main,
+        Notify         = notify,
+        UpdateCounter  = updateCounter,
+        UpdateStatus   = updateStatus,
+        AutoSwitchBg   = switchBg,
+        AutoSwitchKnob = switchKnob,
+        AutoSwitchBtn  = switchBtn,
+        StartBtn       = startBtn,
+        StopBtn        = stopBtn,
+    }
+end
+
+local UI = makeGui()
+
+local function getCoinsFolder()
+    local container = Workspace:FindFirstChild("Coins") or Workspace
+    local list = {}
+
+    for _, obj in ipairs(container:GetChildren()) do
+        if not obj:IsA("BasePart") and not obj:IsA("Model") then continue end
+
+        local nameMatch = false
+        for _, n in ipairs(CONFIG.CoinNames) do
+            if obj.Name:lower():find(n:lower(), 1, true) then
+                nameMatch = true
+                break
+            end
+        end
+
+        if nameMatch or obj:GetAttribute(CONFIG.CoinTag) then
+            local part = obj:IsA("BasePart") and obj or obj.PrimaryPart
+            if not part and obj:IsA("Model") then
+                part = obj:FindFirstChildWhichIsA("BasePart", true)
+            end
+            if part then
+                table.insert(list, {obj = obj, part = part})
+            end
+        end
+    end
+
+    return list
+end
+
+local function getNearestCoin()
+    local coins = getCoinsFolder()
+    local char = LocalPlayer.Character
+    if not char then return nil end
+    local hrp = char:FindFirstChild("HumanoidRootPart")
+    if not hrp then return nil end
+
+    local nearest, bestDist = nil, math.huge
+    for _, c in ipairs(coins) do
+        if not c.part.Parent then continue end
+        local d = (c.part.Position - hrp.Position).Magnitude
+        if d < bestDist then
+            bestDist = d
+            nearest = c
+        end
+    end
+    return nearest
+end
+
+local function moveTo(pos)
+    local char = LocalPlayer.Character
+    if not char then return end
+    local hum = char:FindFirstChildOfClass("Humanoid")
+    if not hum then return end
+    hum:MoveTo(pos)
+end
+
+local function collectCoin(coin)
+    if coin and coin.obj and coin.obj.Parent then
+        coin.obj:Destroy()
+    end
+end
+
+local function waitForCharacter()
+    if LocalPlayer.Character then return end
+    LocalPlayer.CharacterAdded:Wait()
+    task.wait(0.5)
+end
+
+local function resetCharacter()
+    local char = LocalPlayer.Character
+    if not char then return end
+    local hum = char:FindFirstChildOfClass("Humanoid")
+    if hum then
+        hum.Health = 0
+    end
+end
+
+local function runCycle()
+    if State.CycleActive then return end
+    State.CycleActive = true
+    State.CoinCount = 0
+    UI.UpdateCounter()
+    UI.UpdateStatus("Iniciando ciclo", Color3.fromRGB(180, 220, 255))
+    UI.Notify("Novo ciclo iniciado", 2.5)
+
+    while State.AutoFarm and State.Running and State.CoinCount < CONFIG.MaxCoins do
+        local coin = getNearestCoin()
+        if not coin then
+            UI.UpdateStatus("Aguardando moedas...", Color3.fromRGB(255, 200, 100))
+            task.wait(CONFIG.ScanInterval)
+            continue
+        end
+
+        UI.UpdateStatus("Indo até moeda", Color3.fromRGB(150, 200, 255))
+
+        local char = LocalPlayer.Character
+        if not char then
+            waitForCharacter()
+            continue
+        end
+        local hrp = char:FindFirstChild("HumanoidRootPart")
+        if not hrp then task.wait(0.1) continue end
+
+        local targetPos = coin.part.Position
+        local t0 = tick()
+
+        while State.AutoFarm and State.Running and tick() - t0 < CONFIG.MoveTimeout do
+            if not coin.part or not coin.part.Parent then break end
+            local charNow = LocalPlayer.Character
+            if not charNow then break end
+            local hrpNow = charNow:FindFirstChild("HumanoidRootPart")
+            if not hrpNow then break end
+
+            local dist = (coin.part.Position - hrpNow.Position).Magnitude
+            if dist <= CONFIG.CollectRadius then
+                break
+            end
+
+            moveTo(coin.part.Position)
+            task.wait(0.08)
+        end
+
+        local charNow = LocalPlayer.Character
+        local hrpNow = charNow and charNow:FindFirstChild("HumanoidRootPart")
+        if coin.part and coin.part.Parent and hrpNow then
+            local dist = (coin.part.Position - hrpNow.Position).Magnitude
+            if dist <= CONFIG.CollectRadius + 2 then
+                collectCoin(coin)
+                State.CoinCount = State.CoinCount + 1
+                UI.UpdateCounter()
+                UI.Notify("Moeda coletada (" .. State.CoinCount .. "/" .. CONFIG.MaxCoins .. ")", 1.6)
+            else
+                UI.UpdateStatus("Moeda inalcançável, tentando outra", Color3.fromRGB(255, 150, 150))
+            end
+        end
+
+        task.wait(0.05)
+    end
+
+    if State.CoinCount >= CONFIG.MaxCoins then
+        UI.UpdateStatus("Meta atingida! Resetando...", Color3.fromRGB(120, 255, 150))
+        UI.Notify("40 moedas coletadas! Resetando personagem...", 3)
+
+        task.wait(0.8)
+        State.CycleActive = false
+
+        resetCharacter()
+        waitForCharacter()
+
+        task.wait(1.5)
+
+        if State.AutoFarm and State.Running then
+            UI.Notify("Reiniciando novo ciclo", 2)
+            task.spawn(runCycle)
+        else
+            UI.UpdateStatus("Parado", Color3.fromRGB(160, 160, 180))
+        end
+    else
+        State.CycleActive = false
+        UI.UpdateStatus("Farm interrompido", Color3.fromRGB(255, 160, 160))
+    end
+end
+
+local autoOn = false
+
+local function setAutoVisual(on)
+    autoOn = on
+    local targetPos  = on and UDim2.new(1, -26, 0.5, -10) or UDim2.new(0, 3, 0.5, -10)
+    local targetCol  = on and Color3.fromRGB(60, 180, 90)  or Color3.fromRGB(60, 60, 70)
+
+    TweenService:Create(UI.AutoSwitchKnob, TweenInfo.new(0.2), {Position = targetPos}):Play()
+    TweenService:Create(UI.AutoSwitchBg,   TweenInfo.new(0.2), {BackgroundColor3 = targetCol}):Play()
+end
+
+UI.AutoSwitchBtn.MouseButton1Click:Connect(function()
+    State.AutoFarm = not State.AutoFarm
+    setAutoVisual(State.AutoFarm)
+
+    if State.AutoFarm then
+        UI.Notify("Auto Farm ativado", 2)
+        UI.UpdateStatus("Auto Farm ativado", Color3.fromRGB(150, 255, 170))
+        if not State.Running then
+            State.Running = true
+            task.spawn(runCycle)
+        end
+    else
+        UI.Notify("Auto Farm desativado", 2)
+        UI.UpdateStatus("Parado", Color3.fromRGB(160, 160, 180))
+    end
+end)
+
+UI.StartBtn.MouseButton1Click:Connect(function()
+    if State.Running and State.CycleActi
