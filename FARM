@@ -1,270 +1,217 @@
-local Players=game:GetService("Players")
-local RunService=game:GetService("RunService")
-local TweenService=game:GetService("TweenService")
-local UIS=game:GetService("UserInputService")
-local WS=game:GetService("Workspace")
-local LP=Players.LocalPlayer
-local PG=LP:WaitForChild("PlayerGui")
+-- Carrega a UI do Rayfield
+local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
 
-local CFG={CoinNames={"Coin","Moeda","CoinTest"},CoinTag="MM2FarmCoin",MaxCoins=40,MoveTimeout=6,CollectRadius=6,ScanInterval=0.4,RGBSpeed=1.6}
-local State={AutoFarm=false,Running=false,CoinCount=0,CycleActive=false}if PG:FindFirstChild("MM2FarmHub") then PG.MM2FarmHub:Destroy() end
-local gui=Instance.new("ScreenGui")
-gui.Name="MM2FarmHub" gui.ResetOnSpawn=false gui.IgnoreGuiInset=true
-gui.Parent=PG
+local Players = game:GetService("Players")
+local Workspace = game:GetService("Workspace")
+local LP = Players.LocalPlayer
 
-local tBtn=Instance.new("TextButton")
-tBtn.Size=UDim2.new(0,60,0,60) tBtn.Position=UDim2.new(0,20,0.5,-30)
-tBtn.BackgroundColor3=Color3.fromRGB(18,18,22) tBtn.Text="M"
-tBtn.TextColor3=Color3.new(1,1,1) tBtn.TextScaled=true
-tBtn.Font=Enum.Font.GothamBold tBtn.BorderSizePixel=0 tBtn.Parent=gui
-Instance.new("UICorner",tBtn).CornerRadius=UDim.new(1,0)
-local tStroke=Instance.new("UIStroke",tBtn)
-tStroke.Thickness=2 tStroke.Color=Color3.fromRGB(255,0,128)
+-- ===== CONFIG =====
+local MAX_COINS      = 40
+local COLLECT_RADIUS = 6
+local MOVE_TIMEOUT   = 6
+local SCAN_WAIT      = 0.4
+local COIN_NAMES     = {"Coin", "Moeda", "CoinTest"}
 
-local main=Instance.new("Frame")
-main.Size=UDim2.new(0,300,0,360) main.Position=UDim2.new(0,90,0.5,-180)
-main.BackgroundColor3=Color3.fromRGB(20,20,25) main.BorderSizePixel=0
-main.ClipsDescendants=true main.Visible=false main.Parent=gui
-Instance.new("UICorner",main).CornerRadius=UDim.new(0,16)
-local mStroke=Instance.new("UIStroke",main)
-mStroke.Thickness=2 mStroke.Color=Color3.fromRGB(255,0,128)
+-- ===== ESTADO =====
+local State = {
+    Running   = false,
+    CoinCount = 0,
+    Active    = false,
+}
 
-local header=Instance.new("Frame",main)
-header.Size=UDim2.new(1,0,0,42) header.BackgroundColor3=Color3.fromRGB(15,15,20)
-header.BorderSizePixel=0
-Instance.new("UICorner",header).CornerRadius=UDim.new(0,16)
-local hFix=Instance.new("Frame",header)
-hFix.Size=UDim2.new(1,0,0,20) hFix.Position=UDim2.new(0,0,1,-20)
-hFix.BackgroundColor3=Color3.fromRGB(15,15,20) hFix.BorderSizePixel=0
+-- ===== JANELA RAYFIELD =====
+local Window = Rayfield:CreateWindow({
+    Name = "MM2 COIN FARM HUB",
+    LoadingTitle = "Carregando...",
+    LoadingSubtitle = "por você",
+    ConfigurationSaving = { Enabled = false },
+    KeySystem = false,
+})
 
-local title=Instance.new("TextLabel",header)
-title.Size=UDim2.new(1,-60,1,0) title.Position=UDim2.new(0,15,0,0)
-title.BackgroundTransparency=1 title.Text="MM2 COIN FARM HUB"
-title.TextColor3=Color3.new(1,1,1) title.TextSize=15
-title.Font=Enum.Font.GothamBold title.TextXAlignment=Enum.TextXAlignment.Left
+local Tab = Window:CreateTab("Farm", 4483362458)
 
-local closeBtn=Instance.new("TextButton",header)
-closeBtn.Size=UDim2.new(0,24,0,24) closeBtn.Position=UDim2.new(1,-32,0,9)
-closeBtn.BackgroundColor3=Color3.fromRGB(60,20,30) closeBtn.Text="X"
-closeBtn.TextColor3=Color3.new(1,1,1) closeBtn.TextSize=12
-closeBtn.Font=Enum.Font.GothamBold closeBtn.BorderSizePixel=0
-Instance.new("UICorner",closeBtn).CornerRadius=UDim.new(1,0)
+local CoinLabel = Tab:CreateLabel("Coins: 0/" .. MAX_COINS)
+local StatusLabel = Tab:CreateLabel("Status: Parado")
 
-local content=Instance.new("Frame",main)
-content.Size=UDim2.new(1,-20,1,-60) content.Position=UDim2.new(0,10,0,50)
-content.BackgroundTransparency=1
-local layout=Instance.new("UIListLayout",content)
-layout.Padding=UDim.new(0,8) layout.SortOrder=Enum.SortOrder.LayoutOrderlocal function card(h)
-local c=Instance.new("Frame",content)
-c.Size=UDim2.new(1,0,0,h) c.BackgroundColor3=Color3.fromRGB(28,28,34)
-c.BorderSizePixel=0
-Instance.new("UICorner",c).CornerRadius=UDim.new(0,12)
-local s=Instance.new("UIStroke",c) s.Thickness=1 s.Color=Color3.fromRGB(80,80,100)
-return c end
+local AutoToggle
+AutoToggle = Tab:CreateToggle({
+    Name = "Auto Farm",
+    CurrentValue = false,
+    Flag = "AutoFarm",
+    Callback = function(v)
+        if v then
+            startFarm()
+        else
+            stopFarm()
+        end
+    end,
+})
 
-local cCard=card(70)
-local counter=Instance.new("TextLabel",cCard)
-counter.Size=UDim2.new(1,-20,0,30) counter.Position=UDim2.new(0,10,0,10)
-counter.BackgroundTransparency=1 counter.Text="Coins: 0/"..CFG.MaxCoins
-counter.TextColor3=Color3.new(1,1,1) counter.TextSize=20
-counter.Font=Enum.Font.GothamBold counter.TextXAlignment=Enum.TextXAlignment.Left
+Tab:CreateButton({
+    Name = "Stop Farm",
+    Callback = function()
+        stopFarm()
+        if AutoToggle then AutoToggle:Set(false) end
+    end,
+})
 
-local status=Instance.new("TextLabel",cCard)
-status.Size=UDim2.new(1,-20,0,20) status.Position=UDim2.new(0,10,0,42)
-status.BackgroundTransparency=1 status.Text="Status: Parado"
-status.TextColor3=Color3.fromRGB(160,160,180) status.TextSize=12
-status.Font=Enum.Font.Gotham status.TextXAlignment=Enum.TextXAlignment.Left
-
-local aCard=card(50)
-local aLbl=Instance.new("TextLabel",aCard)
-aLbl.Size=UDim2.new(0.6,0,1,0) aLbl.Position=UDim2.new(0,14,0,0)
-aLbl.BackgroundTransparency=1 aLbl.Text="Auto Farm"
-aLbl.TextColor3=Color3.new(1,1,1) aLbl.TextSize=14
-aLbl.Font=Enum.Font.GothamMedium aLbl.TextXAlignment=Enum.TextXAlignment.Left
-
-local swBg=Instance.new("Frame",aCard)
-swBg.Size=UDim2.new(0,46,0,26) swBg.Position=UDim2.new(1,-60,0.5,-13)
-swBg.BackgroundColor3=Color3.fromRGB(60,60,70) swBg.BorderSizePixel=0
-Instance.new("UICorner",swBg).CornerRadius=UDim.new(1,0)
-
-local knob=Instance.new("Frame",swBg)
-knob.Size=UDim2.new(0,20,0,20) knob.Position=UDim2.new(0,3,0.5,-10)
-knob.BackgroundColor3=Color3.fromRGB(230,230,230) knob.BorderSizePixel=0
-Instance.new("UICorner",knob).CornerRadius=UDim.new(1,0)
-
-local swBtn=Instance.new("TextButton",swBg)
-swBtn.Size=UDim2.new(1,0,1,0) swBtn.BackgroundTransparency=1 swBtn.Text=""
-
-local bRow=card(50)
-local function aBtn(txt,col,xs,xo,ws)
-local b=Instance.new("TextButton",bRow)
-b.Size=UDim2.new(ws,0,0,34) b.Position=UDim2.new(xs,xo,0.5,-17)
-b.BackgroundColor3=col b.Text=txt b.TextColor3=Color3.new(1,1,1)
-b.TextSize=13 b.Font=Enum.Font.GothamBold b.BorderSizePixel=0
-Instance.new("UICorner",b).CornerRadius=UDim.new(0,8)
-local s=Instance.new("UIStroke",b) s.Thickness=1 s.Color=Color3.fromRGB(90,90,110)
-return b end
-
-local startBtn=aBtn("Start",Color3.fromRGB(40,130,70),0,10,0.47)
-local stopBtn=aBtn("Stop Farm",Color3.fromRGB(150,40,50),0.5,0,0.47)
-
-local nHolder=Instance.new("Frame",gui)
-nHolder.Size=UDim2.new(0,260,1,-40) nHolder.Position=UDim2.new(1,-280,0,20)
-nHolder.BackgroundTransparency=1
-local nLay=Instance.new("UIListLayout",nHolder)
-nLay.Padding=UDim.new(0,8) nLay.VerticalAlignment=Enum.VerticalAlignment.Top
-
-local function notify(txt,dur)
-dur=dur or 3
-local n=Instance.new("Frame",nHolder)
-n.Size=UDim2.new(1,0,0,44) n.BackgroundColor3=Color3.fromRGB(22,22,28)
-n.BackgroundTransparency=1 n.BorderSizePixel=0
-Instance.new("UICorner",n).CornerRadius=UDim.new(0,10)
-local s=Instance.new("UIStroke",n) s.Thickness=1.5
-s.Color=Color3.fromRGB(255,0,128) s.Transparency=1
-local l=Instance.new("TextLabel",n)
-l.Size=UDim2.new(1,-20,1,0) l.Position=UDim2.new(0,10,0,0)
-l.BackgroundTransparency=1 l.Text="  "..txt l.TextColor3=Color3.new(1,1,1)
-l.TextSize=13 l.Font=Enum.Font.GothamMedium
-l.TextXAlignment=Enum.TextXAlignment.Left l.TextTransparency=1
-TweenService:Create(n,TweenInfo.new(0.25),{BackgroundTransparency=0}):Play()
-TweenService:Create(s,TweenInfo.new(0.25),{Transparency=0}):Play()
-TweenService:Create(l,TweenInfo.new(0.25),{TextTransparency=0}):Play()
-task.delay(dur,function()
-TweenService:Create(n,TweenInfo.new(0.3),{BackgroundTransparency=1}):Play()
-TweenService:Create(s,TweenInfo.new(0.3),{Transparency=1}):Play()
-TweenService:Create(l,TweenInfo.new(0.3),{TextTransparency=1}):Play()
-task.wait(0.35) n:Destroy() end) end
-
-local function updCount()
-counter.Text="Coins: "..State.CoinCount.."/"..CFG.MaxCoins
-counter.TextColor3=State.CoinCount>=CFG.MaxCoins and Color3.fromRGB(120,255,150) or Color3.new(1,1,1)
+-- ===== FUNÇÕES =====
+local function notify(t, c)
+    Rayfield:Notify({Title = "MM2 Farm", Content = t, Duration = 2})
 end
-local function updStat(t,c) status.Text="Status: "..t
-status.TextColor3=c or Color3.fromRGB(160,160,180) end
 
-task.spawn(function()
-local t=0
-while gui.Parent do
-t=t+(1/60)*CFG.RGBSpeed
-local col=Color3.fromHSV(t%1,1,1)
-tStroke.Color=col mStroke.Color=col
-RunService.RenderStepped:Wait() end end)
+local function updateUI()
+    CoinLabel:Set("Coins: " .. State.CoinCount .. "/" .. MAX_COINS)
+end
 
-local drag,ds,sp
-header.InputBegan:Connect(function(i)
-if i.UserInputType==Enum.UserInputType.MouseButton1 or i.UserInputType==Enum.UserInputType.Touch then
-drag=true ds=i.Position sp=main.Position end end)
-UIS.InputChanged:Connect(function(i)
-if drag and (i.UserInputType==Enum.UserInputType.MouseMovement or i.UserInputType==Enum.UserInputType.Touch) then
-local d=i.Position-ds
-main.Position=UDim2.new(sp.X.Scale,sp.X.Offset+d.X,sp.Y.Scale,sp.Y.Offset+d.Y) end end)
-UIS.InputEnded:Connect(function(i)
-if i.UserInputType==Enum.UserInputType.MouseButton1 or i.UserInputType==Enum.UserInputType.Touch then drag=false end end)
-
-local open=false
-local function setMenu(o)
-open=o
-if o then main.Visible=true main.Size=UDim2.new(0,300,0,1)
-TweenService:Create(main,TweenInfo.new(0.25,Enum.EasingStyle.Back,Enum.EasingDirection.Out),{Size=UDim2.new(0,300,0,360)}):Play()
-else local tw=TweenService:Create(main,TweenInfo.new(0.2),{Size=UDim2.new(0,300,0,1)})
-tw:Play() tw.Completed:Connect(function() main.Visible=false end) end end
-tBtn.MouseButton1Click:Connect(function() setMenu(not open) end)
-closeBtn.MouseButton1Click:Connect(function() setMenu(false) end)
+local function setStatus(t)
+    StatusLabel:Set("Status: " .. t)
+end
 
 local function getCoins()
-local cont=WS:FindFirstChild("Coins") or WS
-local list={}
-for _,o in ipairs(cont:GetChildren()) do
-if o:IsA("BasePart") or o:IsA("Model") then
-local m=false
-for _,n in ipairs(CFG.CoinNames) do
-if o.Name:lower():find(n:lower(),1,true) then m=true break end end
-if m or o:GetAttribute(CFG.CoinTag) then
-local p=o:IsA("BasePart") and o or o.PrimaryPart
-if not p and o:IsA("Model") then p=o:FindFirstChildWhichIsA("BasePart",true) end
-if p then table.insert(list,{obj=o,part=p}) end end end end
-return list end
+    local container = Workspace:FindFirstChild("Coins") or Workspace
+    local list = {}
+    for _, obj in ipairs(container:GetChildren()) do
+        if obj:IsA("BasePart") or obj:IsA("Model") then
+            local match = false
+            for _, n in ipairs(COIN_NAMES) do
+                if obj.Name:lower():find(n:lower(), 1, true) then
+                    match = true
+                    break
+                end
+            end
+            if match then
+                local part = obj:IsA("BasePart") and obj or obj.PrimaryPart
+                if not part and obj:IsA("Model") then
+                    part = obj:FindFirstChildWhichIsA("BasePart", true)
+                end
+                if part then table.insert(list, {obj = obj, part = part}) end
+            end
+        end
+    end
+    return list
+end
 
-local function nearest()
-local c=getCoins() local ch=LP.Character if not ch then return end
-local hrp=ch:FindFirstChild("HumanoidRootPart") if not hrp then return end
-local best,bd=nil,math.huge
-for _,x in ipairs(c) do
-if x.part.Parent then
-local d=(x.part.Position-hrp.Position).Magnitude
-if d<bd then bd=d best=x end end end
-return best end
+local function getNearest()
+    local char = LP.Character
+    if not char then return nil end
+    local hrp = char:FindFirstChild("HumanoidRootPart")
+    if not hrp then return nil end
+    local best, bd = nil, math.huge
+    for _, c in ipairs(getCoins()) do
+        if c.part.Parent then
+            local d = (c.part.Position - hrp.Position).Magnitude
+            if d < bd then bd = d best = c end
+        end
+    end
+    return best
+end
 
-local function move(p) local ch=LP.Character if not ch then return end
-local h=ch:FindFirstChildOfClass("Humanoid") if h then h:MoveTo(p) end end
+local function move(pos)
+    local char = LP.Character
+    if not char then return end
+    local hum = char:FindFirstChildOfClass("Humanoid")
+    if hum then hum:MoveTo(pos) end
+end
 
-local function collect(c) if c and c.obj and c.obj.Parent then c.obj:Destroy() end end
-local function waitChar() if LP.Character then return end LP.CharacterAdded:Wait() task.wait(0.5) end
-local function reset() local ch=LP.Character if not ch then return end
-local h=ch:FindFirstChildOfClass("Humanoid") if h then h.Health=0 end end
+local function waitChar()
+    if LP.Character then return end
+    LP.CharacterAdded:Wait()
+    task.wait(0.5)
+end
 
+local function resetChar()
+    local char = LP.Character
+    if not char then return end
+    local hum = char:FindFirstChildOfClass("Humanoid")
+    if hum then hum.Health = 0 end
+end
+
+-- ===== LOOP =====
 local function cycle()
-if State.CycleActive then return end
-State.CycleActive=true State.CoinCount=0
-updCount() updStat("Iniciando ciclo",Color3.fromRGB(180,220,255))
-notify("Novo ciclo iniciado",2.5)
-while State.AutoFarm and State.Running and State.CoinCount<CFG.MaxCoins do
-local c=nearest()
-if not c then updStat("Aguardando moedas...",Color3.fromRGB(255,200,100))
-task.wait(CFG.ScanInterval) else
-updStat("Indo até moeda",Color3.fromRGB(150,200,255))
-local ch=LP.Character
-if not ch then waitChar() else
-local hrp=ch:FindFirstChild("HumanoidRootPart")
-if hrp then
-local t0=tick()
-while State.AutoFarm and State.Running and tick()-t0<CFG.MoveTimeout do
-if not c.part or not c.part.Parent then break end
-local cn=LP.Character if not cn then break end
-local hn=cn:FindFirstChild("HumanoidRootPart") if not hn then break end
-if (c.part.Position-hn.Position).Magnitude<=CFG.CollectRadius then break end
-move(c.part.Position) task.wait(0.08) end
-local cn=LP.Character local hn=cn and cn:FindFirstChild("HumanoidRootPart")
-if c.part and c.part.Parent and hn then
-if (c.part.Position-hn.Position).Magnitude<=CFG.CollectRadius+2 then
-collect(c) State.CoinCount=State.CoinCount+1 updCount()
-notify("Moeda coletada ("..State.CoinCount.."/"..CFG.MaxCoins..")",1.6)
-else updStat("Moeda inalcançável",Color3.fromRGB(255,150,150)) end end end end
-task.wait(0.05) end end
-if State.CoinCount>=CFG.MaxCoins then
-updStat("Meta atingida! Resetando...",Color3.fromRGB(120,255,150))
-notify("40 moedas! Resetando...",3)
-task.wait(0.8) State.CycleActive=false
-reset() waitChar() task.wait(1.5)
-if State.AutoFarm and State.Running then
-notify("Reiniciando ciclo",2) task.spawn(cycle)
-else updStat("Parado") end
-else State.CycleActive=false updStat("Farm interrompido",Color3.fromRGB(255,160,160)) end end
+    if State.Active then return end
+    State.Active = true
+    State.CoinCount = 0
+    updateUI()
+    setStatus("Iniciando ciclo")
+    notify("Novo ciclo iniciado")
 
-local function setVis(on)
-local tp=on and UDim2.new(1,-26,0.5,-10) or UDim2.new(0,3,0.5,-10)
-local tc=on and Color3.fromRGB(60,180,90) or Color3.fromRGB(60,60,70)
-TweenService:Create(knob,TweenInfo.new(0.2),{Position=tp}):Play()
-TweenService:Create(swBg,TweenInfo.new(0.2),{BackgroundColor3=tc}):Play() end
+    while State.Running and State.CoinCount < MAX_COINS do
+        local coin = getNearest()
+        if not coin then
+            setStatus("Aguardando moedas...")
+            task.wait(SCAN_WAIT)
+        else
+            setStatus("Indo até moeda")
+            local char = LP.Character
+            if not char then waitChar() else
+                local hrp = char:FindFirstChild("HumanoidRootPart")
+                if hrp then
+                    local t0 = tick()
+                    while State.Running and tick() - t0 < MOVE_TIMEOUT do
+                        if not coin.part or not coin.part.Parent then break end
+                        local cn = LP.Character
+                        if not cn then break end
+                        local hn = cn:FindFirstChild("HumanoidRootPart")
+                        if not hn then break end
+                        if (coin.part.Position - hn.Position).Magnitude <= COLLECT_RADIUS then break end
+                        move(coin.part.Position)
+                        task.wait(0.08)
+                    end
 
-swBtn.MouseButton1Click:Connect(function()
-State.AutoFarm=not State.AutoFarm setVis(State.AutoFarm)
-if State.AutoFarm then notify("Auto Farm ativado",2)
-updStat("Auto Farm ativado",Color3.fromRGB(150,255,170))
-if not State.Running then State.Running=true task.spawn(cycle) end
-else notify("Auto Farm desativado",2) updStat("Parado") end end)
+                    local cn = LP.Character
+                    local hn = cn and cn:FindFirstChild("HumanoidRootPart")
+                    if coin.part and coin.part.Parent and hn then
+                        if (coin.part.Position - hn.Position).Magnitude <= COLLECT_RADIUS + 2 then
+                            coin.obj:Destroy()
+                            State.CoinCount = State.CoinCount + 1
+                            updateUI()
+                            notify("Moeda " .. State.CoinCount .. "/" .. MAX_COINS)
+                        end
+                    end
+                end
+            end
+            task.wait(0.05)
+        end
+    end
 
-startBtn.MouseButton1Click:Connect(function()
-if State.Running and State.CycleActive then notify("Já está rodando",1.5) return end
-State.Running=true State.AutoFarm=true setVis(true)
-notify("Farm iniciado",2) task.spawn(cycle) end)
+    if State.CoinCount >= MAX_COINS then
+        setStatus("Meta atingida! Resetando...")
+        notify("40 moedas! Resetando personagem")
+        task.wait(0.8)
+        State.Active = false
+        resetChar()
+        waitChar()
+        task.wait(1.5)
+        if State.Running then
+            notify("Reiniciando ciclo")
+            task.spawn(cycle)
+        else
+            setStatus("Parado")
+        end
+    else
+        State.Active = false
+        setStatus("Farm interrompido")
+    end
+end
 
-stopBtn.MouseButton1Click:Connect(function()
-State.Running=false State.AutoFarm=false State.CycleActive=false setVis(false)
-updStat("Farm parado",Color3.fromRGB(255,160,160))
-notify("Stop Farm",2) end)
+function startFarm()
+    if State.Running and State.Active then
+        notify("Já está rodando")
+        return
+    end
+    State.Running = true
+    notify("Farm iniciado")
+    task.spawn(cycle)
+end
 
-updCount() updStat("Pronto",Color3.fromRGB(180,220,255))
-notify("MM2 FARM HUB carregado",3)
-task.wait(0.3) setMenu(true)
+function stopFarm()
+    State.Running = false
+    State.Active = false
+    setStatus("Farm parado")
+    notify("Stop Farm")
+end
+
+updateUI()
+setStatus("Pronto")
+notify("MM2 Farm Hub carregado")
