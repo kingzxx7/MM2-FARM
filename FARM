@@ -6,14 +6,12 @@ local RunService = game:GetService("RunService")
 local LP         = Players.LocalPlayer
 
 local MAX_COINS      = 40
-local COLLECT_RADIUS = 10
+local COLLECT_RADIUS = 6
 
 local CONFIG = {
-    Speed      = 120,
-    NoClip     = true,
-    AntiAFK    = true,
-    Undermap   = true,
-    UnderDepth = 60,
+    Speed   = 120,
+    NoClip  = true,
+    AntiAFK = true,
 }
 
 local State = { Running = false, CoinCount = 0, Active = false, Dead = false }
@@ -54,19 +52,6 @@ Tab:CreateSlider({
     Range = {30, 400}, Increment = 10, Suffix = "studs/s",
     CurrentValue = CONFIG.Speed, Flag = "FlySpeed",
     Callback = function(v) CONFIG.Speed = v end,
-})
-
-Tab:CreateSlider({
-    Name = "Profundidade Under Map",
-    Range = {20, 200}, Increment = 10, Suffix = "studs",
-    CurrentValue = CONFIG.UnderDepth, Flag = "UnderDepth",
-    Callback = function(v) CONFIG.UnderDepth = v end,
-})
-
-Tab:CreateToggle({
-    Name = "Voar por Baixo do Chão",
-    CurrentValue = true, Flag = "Undermap",
-    Callback = function(v) CONFIG.Undermap = v end,
 })
 
 Tab:CreateToggle({
@@ -126,39 +111,21 @@ if LP.Character then
     if hum then hum.Died:Connect(function() State.Dead = true end) end
 end
 
--- ===== VERIFICAR SE ESTÁ REALMENTE EM PARTIDA =====
+-- ===== CHECAR SE ESTÁ EM PARTIDA =====
 local function isInRound()
-    -- 1. Personagem vivo
     local char = LP.Character
     if not char then return false end
     local hum = char:FindFirstChildOfClass("Humanoid")
     if not hum or hum.Health <= 0 then return false end
-
-    -- 2. HumanoidRootPart existe e está no mapa (não caindo no void)
     local hrp = char:FindFirstChild("HumanoidRootPart")
     if not hrp then return false end
     if hrp.Position.Y < -500 then return false end
-
-    -- 3. Existe algum mapa carregado com CoinContainer E moedas de verdade
-    for _, map in ipairs(Workspace:GetChildren()) do
-        local container = map:FindFirstChild("CoinContainer")
-        if container then
-            for _, coinModel in ipairs(container:GetChildren()) do
-                if coinModel.Name == "Coin_Server" then
-                    local visual = coinModel:FindFirstChild("CoinVisual")
-                    local part   = visual and visual:FindFirstChild("MainCoin")
-                    if part and part:IsA("BasePart") and part.Parent then
-                        return true
-                    end
-                end
-            end
-        end
-    end
-    return false
+    if #getCoins() == 0 then return false end
+    return true
 end
 
 -- ===== BUSCAR MOEDAS =====
-local function getCoins()
+function getCoins()
     local list = {}
     for _, map in ipairs(Workspace:GetChildren()) do
         local container = map:FindFirstChild("CoinContainer")
@@ -184,15 +151,13 @@ local function getNearest()
     if not hrp then return nil end
     local best, bd = nil, math.huge
     for _, c in ipairs(getCoins()) do
-        local dx = c.part.Position.X - hrp.Position.X
-        local dz = c.part.Position.Z - hrp.Position.Z
-        local d = math.sqrt(dx*dx + dz*dz)
+        local d = (c.part.Position - hrp.Position).Magnitude
         if d < bd then bd = d best = c end
     end
     return best
 end
 
--- ===== ESPERAR PARTIDA =====
+-- ===== ESPERAR =====
 local function waitForRound()
     setStatus("Aguardando partida...")
     while State.Running do
@@ -219,8 +184,8 @@ local function resetChar()
     if hum then hum.Health = 0 end
 end
 
--- ===== VOO =====
-local function getOrCreateBV(hrp)
+-- ===== BODY VELOCITY =====
+local function getBV(hrp)
     local bv = hrp:FindFirstChild("MM2FlyBV")
     if not bv then
         bv = Instance.new("BodyVelocity")
@@ -233,12 +198,13 @@ local function getOrCreateBV(hrp)
     return bv
 end
 
-local function destroyBV(hrp)
+local function removeBV(hrp)
     if not hrp then return end
     local bv = hrp:FindFirstChild("MM2FlyBV")
     if bv then bv:Destroy() end
 end
 
+-- ===== VOAR ATÉ POSIÇÃO (uma altura só, sem subir/descer) =====
 local function flyTo(targetPos, bv)
     while State.Running and not State.Dead do
         if not isInRound() then return false end
@@ -248,11 +214,8 @@ local function flyTo(targetPos, bv)
         if not hn then return false end
         if not bv or not bv.Parent then return false end
 
-        local current = hn.Position
-        local dir = targetPos - current
-        local dist = dir.Magnitude
-
-        if dist <= 3 then
+        local dir = targetPos - hn.Position
+        if dir.Magnitude <= 2 then
             bv.Velocity = Vector3.new(0, 0, 0)
             return true
         end
@@ -263,39 +226,20 @@ local function flyTo(targetPos, bv)
     return false
 end
 
-local function getGroundY(x, z)
-    local params = RaycastParams.new()
-    params.FilterType = Enum.RaycastFilterType.Exclude
-    params.FilterDescendantsInstances = { LP.Character }
-    local origin = Vector3.new(x, 500, z)
-    local result = Workspace:Raycast(origin, Vector3.new(0, -1000, 0), params)
-    if result then return result.Position.Y end
-    return 0
-end
-
--- ===== CONTAR MOEDA COM VERIFICAÇÃO REAL =====
--- Só conta se o modelo Coin_Server foi removido do Workspace
-local function tryCollectCoin(coin)
+-- ===== CONTA SÓ SE MOEDA REALMENTE SUMIU =====
+local function collectCoin(coin)
     local serverRef = coin.obj
-    local beforeParent = serverRef.Parent
+    if not serverRef.Parent then return false end
 
-    -- Se já não existe, não conta
-    if not beforeParent then return false end
-
-    -- Espera até 1.5s pra ver se sumiu
     local t0 = tick()
     while tick() - t0 < 1.5 do
-        if not serverRef.Parent then
-            return true -- sumiu = foi coletada de verdade
-        end
+        if not serverRef.Parent then return true end
         task.wait(0.05)
     end
-
-    -- Não sumiu = NÃO conta
     return false
 end
 
--- ===== LOOP PRINCIPAL =====
+-- ===== LOOP =====
 local function cycle()
     if State.Active then return end
     State.Active = true
@@ -303,98 +247,70 @@ local function cycle()
     State.Dead = false
     updateUI()
     setStatus("Iniciando ciclo")
-    notify("Novo ciclo iniciado")
 
     while State.Running and State.CoinCount < MAX_COINS do
-        -- Se não está em partida, PARA TUDO e espera
+        -- Fora de partida? Para e espera
         if not isInRound() then
+            local hrp0 = LP.Character and LP.Character:FindFirstChild("HumanoidRootPart")
+            removeBV(hrp0)
             setStatus("Fora de partida, aguardando...")
-            local hrp = LP.Character and LP.Character:FindFirstChild("HumanoidRootPart")
-            destroyBV(hrp)
             if not waitForRound() then break end
             State.CoinCount = 0
             updateUI()
-            setStatus("Nova partida iniciada")
-            notify("Retomando farm")
+            setStatus("Partida iniciada")
         end
 
         local char = LP.Character
         local hum = char and char:FindFirstChildOfClass("Humanoid")
         if not char or not hum or hum.Health <= 0 then
-            task.wait(0.5)
+            task.wait(0.3)
             continue
         end
 
         local hrp = char:FindFirstChild("HumanoidRootPart")
         if not hrp then task.wait(0.1) continue end
 
-        local bv = getOrCreateBV(hrp)
-        bv.Velocity = Vector3.new(0, 0, 0)
-
         local coin = getNearest()
         if not coin then
-            setStatus("Aguardando moedas...")
-            task.wait(0.3)
+            setStatus("Sem moedas por perto")
+            task.wait(0.2)
         else
             setStatus("Voando até moeda")
 
-            local coinPos = coin.part.Position
+            local bv = getBV(hrp)
+            bv.Velocity = Vector3.new(0, 0, 0)
+
             local serverRef = coin.obj
 
-            -- Destino
-            local dest
-            if CONFIG.Undermap then
-                local groundY = getGroundY(coinPos.X, coinPos.Z)
-                dest = Vector3.new(coinPos.X, groundY - CONFIG.UnderDepth, coinPos.Z)
-            else
-                dest = coinPos
-            end
+            -- Voa direto na moeda (sem subir/descer)
+            flyTo(coin.part.Position, bv)
 
-            -- Verifica se moeda ainda existe ANTES de ir
-            if not serverRef.Parent then
-                task.wait(0.05)
-            else
-                flyTo(dest, bv)
-
-                if not State.Dead and isInRound() then
-                    -- Vai pra cima rapidamente pra tocar na moeda
-                    local cn = LP.Character
-                    local hn = cn and cn:FindFirstChild("HumanoidRootPart")
-                    if hn and serverRef.Parent and coin.part and coin.part.Parent then
-                        hn.CFrame = CFrame.new(coinPos + Vector3.new(0, 3, 0))
-                        task.wait(0.1)
-
-                        -- Só conta se REALMENTE sumiu
-                        if tryCollectCoin(coin) then
+            -- Chegou perto? Só conta se a moeda sumiu
+            if not State.Dead and isInRound() then
+                local cn = LP.Character
+                local hn = cn and cn:FindFirstChild("HumanoidRootPart")
+                if hn and serverRef.Parent then
+                    if (coin.part.Position - hn.Position).Magnitude <= COLLECT_RADIUS then
+                        if collectCoin(coin) then
                             State.CoinCount = State.CoinCount + 1
                             updateUI()
                             notify("Moeda " .. State.CoinCount .. "/" .. MAX_COINS)
                         end
                     end
-
-                    -- Volta pro subsolo
-                    if not State.Dead and CONFIG.Undermap then
-                        local cn2 = LP.Character
-                        local hn2 = cn2 and cn2:FindFirstChild("HumanoidRootPart")
-                        if hn2 then
-                            local gy = getGroundY(hn2.Position.X, hn2.Position.Z)
-                            hn2.CFrame = CFrame.new(hn2.Position.X, gy - CONFIG.UnderDepth, hn2.Position.Z)
-                        end
-                    end
                 end
-
-                destroyBV(hrp)
             end
+
+            removeBV(hrp)
         end
     end
 
     local hrp = LP.Character and LP.Character:FindFirstChild("HumanoidRootPart")
-    destroyBV(hrp)
+    removeBV(hrp)
 
     if State.CoinCount >= MAX_COINS then
         setStatus("Meta atingida! Resetando...")
-        notify("40 moedas! Resetando personagem")
-        task.wait(0.8)
+        notify("40 moedas! Resetando")
+        task.wait(0.5)
         State.Active = false
         resetChar()
         task.wait(2)
@@ -435,9 +351,8 @@ end
 function stopFarm()
     State.Running = false
     State.Active = false
-    State.Waiting = false
     local hrp = LP.Character and LP.Character:FindFirstChild("HumanoidRootPart")
-    destroyBV(hrp)
+    removeBV(hrp)
     setStatus("Farm parado")
     notify("Stop Farm")
 end
